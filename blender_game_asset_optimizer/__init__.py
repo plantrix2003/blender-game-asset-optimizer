@@ -273,7 +273,7 @@ class GAO_OT_repair_normals_shading(bpy.types.Operator):
                     elif len(edge.link_faces) != 2:
                         edge.smooth = False
 
-            if self.smooth_shading:
+            if self.smooth_shading or self.weighted_normals:
                 for face in bm.faces:
                     face.smooth = True
 
