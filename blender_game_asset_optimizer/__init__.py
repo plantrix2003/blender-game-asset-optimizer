@@ -32,6 +32,52 @@ class GAO_OT_report(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def selected_material_images(context):
+    """Return unique image datablocks used by selected mesh materials."""
+    images = {}
+    for obj in selected_meshes(context):
+        for material in obj.data.materials:
+            if material is None or not material.use_nodes or material.node_tree is None:
+                continue
+            for node in material.node_tree.nodes:
+                if node.type == "TEX_IMAGE" and node.image is not None:
+                    image = node.image
+                    images[image.as_pointer()] = image
+    return list(images.values())
+
+
+class GAO_OT_report_textures(bpy.types.Operator):
+    bl_idname = "gao.report_textures"
+    bl_label = "Report Texture Images"
+    bl_description = "List unique image textures used by selected mesh materials"
+
+    def execute(self, context):
+        images = selected_material_images(context)
+        if not images:
+            self.report({"INFO"}, "No image textures found on selected mesh materials")
+            return {"FINISHED"}
+
+        total_bytes = 0
+        print("[Game Asset Optimizer] Texture report")
+        for image in sorted(images, key=lambda item: item.name.lower()):
+            width, height = image.size
+            estimated_bytes = max(0, width) * max(0, height) * 4
+            total_bytes += estimated_bytes
+            status = "packed" if image.packed_file else "external or generated"
+            print(
+                f"  {image.name}: {width}x{height}, "
+                f"estimated RGBA8 size={estimated_bytes / (1024 * 1024):.2f} MiB, "
+                f"source={status}"
+            )
+
+        self.report(
+            {"INFO"},
+            f"Reported {len(images)} unique image(s); estimated RGBA8 total "
+            f"{total_bytes / (1024 * 1024):.2f} MiB (see system console)",
+        )
+        return {"FINISHED"}
+
+
 class GAO_OT_apply_transforms(bpy.types.Operator):
     bl_idname = "gao.apply_transforms"
     bl_label = "Apply Location, Rotation & Scale"
@@ -107,6 +153,7 @@ class GAO_PT_panel(bpy.types.Panel):
         layout = self.layout
         layout.label(text="Selected mesh tools")
         layout.operator("gao.report_selected", icon="INFO")
+        layout.operator("gao.report_textures", icon="IMAGE_DATA")
         layout.operator("gao.apply_transforms", icon="OBJECT_ORIGIN")
         layout.operator("gao.make_decimated_copy", icon="MOD_DECIM")
         layout.operator("gao.export_selected_fbx", icon="EXPORT")
@@ -114,6 +161,7 @@ class GAO_PT_panel(bpy.types.Panel):
 
 CLASSES = (
     GAO_OT_report,
+    GAO_OT_report_textures,
     GAO_OT_apply_transforms,
     GAO_OT_make_decimated_copy,
     GAO_OT_export_fbx,
