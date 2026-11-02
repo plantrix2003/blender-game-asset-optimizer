@@ -10,6 +10,7 @@ bl_info = {
 
 import bpy
 import bmesh
+import math
 
 
 def selected_meshes(context):
@@ -196,6 +197,114 @@ class GAO_OT_repair_mesh(bpy.types.Operator):
         return {"FINISHED"}
 
 
+
+class GAO_OT_repair_normals_shading(bpy.types.Operator):
+    bl_idname = "gao.repair_normals_shading"
+    bl_label = "Repair Normals & Shading"
+    bl_description = "Create safe copies and repair face orientation and hard-surface shading"
+
+    duplicate_before_repair: bpy.props.BoolProperty(
+        name="Keep Original (Create Copy)",
+        description="Duplicate selected meshes before changing normals or shading",
+        default=True,
+    )
+    recalculate_normals: bpy.props.BoolProperty(
+        name="Recalculate Outside",
+        description="Make connected face normals consistent and orient them outward",
+        default=True,
+    )
+    smooth_shading: bpy.props.BoolProperty(
+        name="Enable Smooth Shading",
+        description="Enable smooth shading on faces while retaining detected hard edges",
+        default=False,
+    )
+    preserve_sharp_edges: bpy.props.BoolProperty(
+        name="Detect Hard Edges",
+        description="Mark edges sharper than the angle threshold as sharp",
+        default=True,
+    )
+    sharp_angle: bpy.props.FloatProperty(
+        name="Hard Edge Angle",
+        description="Edges at or above this angle remain sharp",
+        default=math.radians(30.0),
+        min=0.0,
+        max=math.pi,
+        subtype="ANGLE",
+    )
+    weighted_normals: bpy.props.BoolProperty(
+        name="Add Weighted Normal Modifier",
+        description="Add a non-destructive weighted-normal modifier for suitable hard-surface meshes",
+        default=False,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == "OBJECT" and bool(selected_meshes(context))
+
+    def execute(self, context):
+        source_objects = selected_meshes(context)
+        if self.duplicate_before_repair:
+            bpy.ops.object.duplicate()
+            targets = selected_meshes(context)
+            for obj in targets:
+                obj.name = f"{obj.name}_NormalsFixed"
+                obj.data = obj.data.copy()
+        else:
+            targets = source_objects
+
+        processed = 0
+        for obj in targets:
+            mesh = obj.data
+            bm = bmesh.new()
+            bm.from_mesh(mesh)
+            bm.normal_update()
+
+            if self.recalculate_normals and bm.faces:
+                bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+
+            if self.preserve_sharp_edges:
+                threshold = self.sharp_angle
+                for edge in bm.edges:
+                    if len(edge.link_faces) == 2:
+                        try:
+                            edge.smooth = edge.calc_face_angle(0.0) < threshold
+                        except ValueError:
+                            edge.smooth = False
+                    elif len(edge.link_faces) != 2:
+                        edge.smooth = False
+
+            if self.smooth_shading:
+                for face in bm.faces:
+                    face.smooth = True
+
+            bm.to_mesh(mesh)
+            bm.free()
+            mesh.update()
+
+            if self.weighted_normals:
+                modifier = next(
+                    (m for m in obj.modifiers
+                     if m.type == "WEIGHTED_NORMAL" and m.name == "GAO_WeightedNormal"),
+                    None,
+                )
+                if modifier is None:
+                    modifier = obj.modifiers.new(
+                        name="GAO_WeightedNormal", type="WEIGHTED_NORMAL"
+                    )
+                if hasattr(modifier, "keep_sharp"):
+                    modifier.keep_sharp = True
+                if hasattr(modifier, "weight"):
+                    modifier.weight = 50
+
+            processed += 1
+
+        self.report(
+            {"INFO"},
+            f"Processed {processed} mesh(es). Review the result, especially open or intentionally inverted surfaces.",
+        )
+        return {"FINISHED"}
+
+
 class GAO_OT_apply_transforms(bpy.types.Operator):
     bl_idname = "gao.apply_transforms"
     bl_label = "Apply Location, Rotation & Scale"
@@ -276,6 +385,7 @@ class GAO_PT_panel(bpy.types.Panel):
         layout.label(text="Mesh diagnostics & repair")
         layout.operator("gao.mesh_health_report", icon="VIEWZOOM")
         layout.operator("gao.repair_mesh", icon="MODIFIER")
+        layout.operator("gao.repair_normals_shading", icon="NORMALS_FACE")
         layout.operator("gao.apply_transforms", icon="OBJECT_ORIGIN")
         layout.operator("gao.make_decimated_copy", icon="MOD_DECIM")
         layout.operator("gao.export_selected_fbx", icon="EXPORT")
@@ -286,6 +396,7 @@ CLASSES = (
     GAO_OT_report_textures,
     GAO_OT_mesh_health_report,
     GAO_OT_repair_mesh,
+    GAO_OT_repair_normals_shading,
     GAO_OT_apply_transforms,
     GAO_OT_make_decimated_copy,
     GAO_OT_export_fbx,
