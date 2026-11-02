@@ -4,6 +4,7 @@ A small open-source Blender add-on for inspecting and preparing selected meshes 
 
 ## Features
 - Report selected mesh polygon counts and dimensions to the system console.
+- Report unique image textures used by selected mesh materials, including dimensions and estimated uncompressed RGBA8 size.
 - Apply location, rotation and scale transforms.
 - Create decimated LOD copies while preserving the original objects.
 - Export selected objects to FBX.
