@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Game Asset Optimizer",
     "author": "Community contributors",
-    "version": (0, 1, 0),
+    "version": (0, 3, 0),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > Game Asset",
     "description": "Inspect and prepare selected meshes for real-time workflows",
@@ -9,6 +9,7 @@ bl_info = {
 }
 
 import bpy
+import bmesh
 
 
 def selected_meshes(context):
@@ -74,6 +75,123 @@ class GAO_OT_report_textures(bpy.types.Operator):
             {"INFO"},
             f"Reported {len(images)} unique image(s); estimated RGBA8 total "
             f"{total_bytes / (1024 * 1024):.2f} MiB (see system console)",
+        )
+        return {"FINISHED"}
+
+
+def inspect_mesh_data(mesh):
+    """Return basic topology diagnostics for a mesh datablock."""
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+    report = {
+        "vertices": len(bm.verts),
+        "edges": len(bm.edges),
+        "faces": len(bm.faces),
+        "non_manifold_edges": sum(not edge.is_manifold for edge in bm.edges),
+        "boundary_edges": sum(edge.is_boundary for edge in bm.edges),
+        "wire_edges": sum(edge.is_wire for edge in bm.edges),
+        "loose_vertices": sum(not vert.link_edges for vert in bm.verts),
+        "degenerate_faces": sum(face.calc_area() <= 1e-12 for face in bm.faces),
+    }
+    bm.free()
+    return report
+
+
+class GAO_OT_mesh_health_report(bpy.types.Operator):
+    bl_idname = "gao.mesh_health_report"
+    bl_label = "Check Mesh Issues"
+    bl_description = "Report non-manifold edges, loose geometry, and degenerate faces"
+
+    @classmethod
+    def poll(cls, context):
+        return bool(selected_meshes(context))
+
+    def execute(self, context):
+        meshes = selected_meshes(context)
+        print("[Game Asset Optimizer] Mesh health report")
+        for obj in meshes:
+            stats = inspect_mesh_data(obj.data)
+            print(f"  {obj.name}: " + ", ".join(
+                f"{key}={value}" for key, value in stats.items()
+            ))
+        self.report({"INFO"}, f"Mesh report printed for {len(meshes)} object(s); see system console")
+        return {"FINISHED"}
+
+
+class GAO_OT_repair_mesh(bpy.types.Operator):
+    bl_idname = "gao.repair_mesh"
+    bl_label = "Repair Mesh (Safe Copy)"
+    bl_description = "Duplicate selected meshes, weld close vertices, remove loose geometry and recalculate normals"
+
+    merge_distance: bpy.props.FloatProperty(
+        name="Merge Distance",
+        description="Vertices closer than this distance are merged",
+        default=0.0001,
+        min=0.0,
+        precision=6,
+        subtype="DISTANCE",
+    )
+    duplicate_before_repair: bpy.props.BoolProperty(
+        name="Keep Original (Create Copy)",
+        description="Repair duplicates and leave the original mesh objects untouched",
+        default=True,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == "OBJECT" and bool(selected_meshes(context))
+
+    def execute(self, context):
+        source_objects = selected_meshes(context)
+        if self.duplicate_before_repair:
+            bpy.ops.object.duplicate()
+            targets = selected_meshes(context)
+            for obj in targets:
+                obj.name = f"{obj.name}_Repaired"
+                obj.data = obj.data.copy()
+        else:
+            targets = source_objects
+
+        repaired = 0
+        for obj in targets:
+            bm = bmesh.new()
+            bm.from_mesh(obj.data)
+            bm.verts.ensure_lookup_table()
+            bm.edges.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+
+            if self.merge_distance > 0 and bm.verts:
+                bmesh.ops.remove_doubles(
+                    bm, verts=list(bm.verts), dist=self.merge_distance
+                )
+
+            # Remove isolated vertices and wire/loose edges.
+            loose_edges = [edge for edge in bm.edges if edge.is_wire]
+            if loose_edges:
+                bmesh.ops.delete(bm, geom=loose_edges, context="EDGES")
+            loose_verts = [vert for vert in bm.verts if not vert.link_edges]
+            if loose_verts:
+                bmesh.ops.delete(bm, geom=loose_verts, context="VERTS")
+
+            # Remove zero-area/near-zero-area faces and recalculate consistent outward normals.
+            bm.faces.ensure_lookup_table()
+            degenerate_faces = [face for face in bm.faces if face.calc_area() <= 1e-12]
+            if degenerate_faces:
+                bmesh.ops.delete(bm, geom=degenerate_faces, context="FACES")
+            if bm.faces:
+                bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+
+            bm.to_mesh(obj.data)
+            bm.free()
+            obj.data.update()
+            repaired += 1
+
+        self.report(
+            {"WARNING"} if self.duplicate_before_repair else {"INFO"},
+            f"Processed {repaired} mesh(es). Inspect the result; some topology defects need manual repair.",
         )
         return {"FINISHED"}
 
@@ -154,6 +272,10 @@ class GAO_PT_panel(bpy.types.Panel):
         layout.label(text="Selected mesh tools")
         layout.operator("gao.report_selected", icon="INFO")
         layout.operator("gao.report_textures", icon="IMAGE_DATA")
+        layout.separator()
+        layout.label(text="Mesh diagnostics & repair")
+        layout.operator("gao.mesh_health_report", icon="VIEWZOOM")
+        layout.operator("gao.repair_mesh", icon="MOD修")
         layout.operator("gao.apply_transforms", icon="OBJECT_ORIGIN")
         layout.operator("gao.make_decimated_copy", icon="MOD_DECIM")
         layout.operator("gao.export_selected_fbx", icon="EXPORT")
@@ -162,6 +284,8 @@ class GAO_PT_panel(bpy.types.Panel):
 CLASSES = (
     GAO_OT_report,
     GAO_OT_report_textures,
+    GAO_OT_mesh_health_report,
+    GAO_OT_repair_mesh,
     GAO_OT_apply_transforms,
     GAO_OT_make_decimated_copy,
     GAO_OT_export_fbx,
