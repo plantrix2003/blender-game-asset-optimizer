@@ -275,7 +275,7 @@ class GAO_PT_panel(bpy.types.Panel):
         layout.separator()
         layout.label(text="Mesh diagnostics & repair")
         layout.operator("gao.mesh_health_report", icon="VIEWZOOM")
-        layout.operator("gao.repair_mesh", icon="MOD修")
+        layout.operator("gao.repair_mesh", icon="MODIFIER")
         layout.operator("gao.apply_transforms", icon="OBJECT_ORIGIN")
         layout.operator("gao.make_decimated_copy", icon="MOD_DECIM")
         layout.operator("gao.export_selected_fbx", icon="EXPORT")
