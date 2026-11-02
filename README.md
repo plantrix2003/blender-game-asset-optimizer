@@ -7,6 +7,7 @@ A small open-source Blender add-on for inspecting and preparing selected meshes 
 - Report unique image textures used by selected mesh materials, including dimensions and estimated uncompressed RGBA8 size.
 - Inspect mesh topology for non-manifold edges, boundaries, wire edges, loose vertices, and degenerate faces.
 - Repair a duplicate by welding nearby vertices, removing loose geometry and zero-area faces, and recalculating face normals.
+- Repair normals and hard-surface shading on a safe copy, with optional smooth shading, sharp-edge detection by angle, and a weighted-normal modifier.
 - Apply location, rotation and scale transforms.
 - Create decimated LOD copies while preserving the original objects.
 - Export selected objects to FBX.
@@ -23,7 +24,7 @@ Blender 3.6+ is the initial target. Blender-specific behavior must be tested in 
 4. In the 3D Viewport press `N`, then open the **Game Asset** tab.
 
 ## Use
-Select one or more mesh objects and use the panel actions. The decimation action duplicates the selected objects and adds a Decimate modifier to the copies. FBX export uses Blender's FBX exporter.
+Select one or more mesh objects and use the panel actions. **Repair Normals & Shading** creates a copy by default, can recalculate face orientation, optionally enables smooth shading, marks edges sharp using the chosen angle, and can add a Weighted Normal modifier. Keep smooth shading and weighted normals optional for hard-surface assets. The decimation action duplicates the selected objects and adds a Decimate modifier to the copies. FBX export uses Blender's FBX exporter.
 
 ## Roadmap
 - Texture resolution and image-size reporting.
